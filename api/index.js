@@ -4,6 +4,7 @@ import express from 'express';
 import fs from 'fs';
 import cron from 'node-cron';
 import cors from 'cors';
+import { log } from 'console';
 
 dotenv.config();
 
@@ -186,7 +187,7 @@ accounts.forEach((account, index) => {
 
       const files = fileListResponse.data.files;
       if (files.length) {
-        const firstFile = files.find(file => file.size > 0);
+        const firstFile = files.find(file => file.size > 500000);
         
         if (!firstFile) {
           res.send('No non-empty files found.');
@@ -194,7 +195,6 @@ accounts.forEach((account, index) => {
         }
 
         const fileId = firstFile.id;
-        console.log(fileId);
 
         // Set the appropriate content type for the response
         res.setHeader('Content-Type', firstFile.mimeType);
