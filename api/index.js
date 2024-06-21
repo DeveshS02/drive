@@ -2,14 +2,15 @@ import dotenv from 'dotenv';
 import { google } from 'googleapis';
 import express from 'express';
 import fs from 'fs';
+import compression from 'compression';
 import cron from 'node-cron';
 import cors from 'cors';
-import { log } from 'console';
 
 dotenv.config();
 
 const app = express();
 
+app.use(compression());
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
@@ -175,52 +176,103 @@ accounts.forEach((account, index) => {
   });
 
   // Route to display the first image file for each account
-  app.get(`/drive/files/first/${index}`, async (req, res) => {
+  app.get('/drive/files/first/:index', async (req, res) => {
+    const index = req.params.index;
+    const n = parseInt(req.query.n) || 10;  // Number of images to be sent
+    const t = parseInt(req.query.t) || 10;  // Time difference between images
+    const unit = req.query.unit || 'minutes';  // Time unit: 'minutes' or 'hours'
+    
+    const timeMultiplier = unit === 'hours' ? 60 : 1;  // Convert hours to minutes if needed
+    const timeDifference = t * timeMultiplier;  // Calculate the time difference in minutes
+  
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders(); // flush the headers to establish SSE with the client
+    
     try {
       const oauth2Client = getOauthClient(index);
       const drive = google.drive({ version: 'v3', auth: oauth2Client });
-      const fileListResponse = await drive.files.list({
-        pageSize: 20,
-        fields: 'files(id, name, mimeType, size)',
-        q: "mimeType='image/jpeg'",
-      });
-
-      const files = fileListResponse.data.files;
-      if (files.length) {
-        const firstFile = files.find(file => file.size > 500000);
-        
-        if (!firstFile) {
-          res.send('No non-empty files found.');
-          return;
+      let filteredFiles = [];
+      let nextPageToken = null;
+      let lastTimestamp = null;
+      let firstImageTimestamp = null;
+  
+      while (filteredFiles.length < n) {
+        const fileListResponse = await drive.files.list({
+          pageSize: 1000,
+          fields: 'nextPageToken, files(id, name, mimeType, size)',
+          q: "mimeType='image/jpeg'",
+          pageToken: nextPageToken
+        });
+  
+        const files = fileListResponse.data.files;
+        if (!files.length) break;
+  
+        for (const file of files) {
+          if (file.size > 500000) {
+            const fileName = file.name;
+            const timestampMatch = fileName.match(/img(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.jpg/);
+            if (timestampMatch) {
+              const timestamp = timestampMatch[1];
+              const fileDate = new Date(`${timestamp.slice(0, 10)}T${timestamp.slice(11).replace(/-/g, ':')}Z`);
+  
+              if (!firstImageTimestamp) {
+                firstImageTimestamp = fileDate.getTime();
+              }
+  
+              // Check if the image is within 7 days of the first image
+              const sevenDaysInMillis = 7 * 24 * 60 * 60 * 1000;
+              if (fileDate.getTime() > firstImageTimestamp + sevenDaysInMillis) {
+                res.end();  // End the SSE stream
+                return;
+              }
+  
+              if (!lastTimestamp || (fileDate.getTime() <= lastTimestamp - timeDifference * 60000)) {
+                filteredFiles.push(file);
+                lastTimestamp = fileDate.getTime();
+  
+                const fileId = file.id;
+                const fileGetResponse = await drive.files.get(
+                  { fileId, alt: 'media' },
+                  { responseType: 'arraybuffer' }
+                );
+  
+                const fileData = Buffer.from(fileGetResponse.data, 'binary').toString('base64');
+                const response = {
+                  fileName: file.name,
+                  fileData: `data:${file.mimeType};base64,${fileData}`
+                };
+  
+                // Send the image data as a SSE event
+                res.write(`data: ${JSON.stringify(response)}\n\n`);
+                res.flush();
+  
+                if (filteredFiles.length >= n) {
+                  break;
+                }
+              }
+            }
+          }
         }
-
-        const fileId = firstFile.id;
-
-        // Set the appropriate content type for the response
-        res.setHeader('Content-Type', firstFile.mimeType);
-
-        const fileGetResponse = await drive.files.get(
-          { fileId, alt: 'media' },
-          { responseType: 'stream' }
-        );
-
-        fileGetResponse.data
-          .on('end', () => {
-            console.log('Done downloading file.');
-          })
-          .on('error', (err) => {
-            console.error('Error downloading file.', err);
-            res.status(500).send('Error downloading file.');
-          })
-          .pipe(res);
-      } else {
-        res.send('No files found.');
+  
+        if (filteredFiles.length >= n) {
+          break;
+        }
+  
+        nextPageToken = fileListResponse.data.nextPageToken;
+        if (!nextPageToken) {
+          break;  // No more files to fetch
+        }
       }
+  
+      res.end();  // End the SSE stream
     } catch (error) {
-      console.error('Error fetching file:', error);
-      res.status(500).send('Error fetching file');
+      console.error('Error fetching files:', error);
+      res.write(`event: error\ndata: ${JSON.stringify({ message: 'Error fetching files' })}\n\n`);
+      res.end();  // End the SSE stream
     }
-  });
+  });       
 });
 
 // Schedule task to refresh credentials for each account every hour

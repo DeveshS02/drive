@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Stream</title>
+  <style>
+    .image-container {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .loader {
+      border: 16px solid #f3f3f3;
+      border-radius: 50%;
+      border-top: 16px solid #3498db;
+      width: 120px;
+      height: 120px;
+      animation: spin 2s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <h1>Drive Fetcher</h1>
+
+   <div>
+    <label for="n">Number of Images:</label>
+    <input type="number" id="n" name="n" required>
+    <label for="t">Time Difference Value:</label>
+    <input type="number" id="t" name="t" required>
+    <label for="timeUnit">Time Unit:</label>
+    <select id="timeUnit" name="timeUnit" required>
+      <option value="minutes">Minutes</option>
+      <option value="hours">Hours</option>
+    </select>
+    <button onclick="fetchImages()">Start Stream</button>
+   </div>
+
+  <div id="images"></div>
+  <div id="loader" class="loader" style="display:none;"></div>
+
+  <script>
+    function fetchImages() {
+
+      const n = document.getElementById('n').value;
+      const t = document.getElementById('t').value;
+      const index=0;
+      const timeUnit = document.getElementById('timeUnit').value;
+      const imagesDiv = document.getElementById('images');
+      const loaderDiv = document.getElementById('loader');
+      imagesDiv.innerHTML = ''; // Clear previous images
+      loaderDiv.style.display = 'block'; // Show loader
+
+      const eventSource = new EventSource(`http://localhost:3000/drive/files/first/${index}?n=${n}&t=${t}&unit=${timeUnit}`);
+
+      let firstImageDisplayed = false;
+
+      eventSource.onmessage = function(event) {
+
+        if (!firstImageDisplayed) {
+          loaderDiv.style.display = 'none'; // Hide loader
+          firstImageDisplayed = true;
+        }
+
+        const data = JSON.parse(event.data);
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-container';
+
+        const img = document.createElement('img');
+        img.src = data.fileData;
+        img.alt = data.fileName;
+        img.style.maxWidth = '40%';
+
+        const fileName = document.createElement('p');
+        fileName.textContent = data.fileName;
+
+        imageContainer.appendChild(img);
+        imageContainer.appendChild(fileName);
+        imagesDiv.appendChild(imageContainer);
+      };
+
+      eventSource.onerror = function() {
+        console.error('EventSource failed.');
+        eventSource.close();
+      };
+    }
+  </script>
+</body>
+</html>
