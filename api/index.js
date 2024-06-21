@@ -5,7 +5,6 @@ import fs from 'fs';
 import compression from 'compression';
 import cron from 'node-cron';
 import cors from 'cors';
-import { log } from 'console';
 
 dotenv.config();
 
