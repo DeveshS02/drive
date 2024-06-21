@@ -5,6 +5,7 @@ import fs from 'fs';
 import compression from 'compression';
 import cron from 'node-cron';
 import cors from 'cors';
+import { log } from 'console';
 
 dotenv.config();
 
@@ -201,7 +202,7 @@ accounts.forEach((account, index) => {
       while (filteredFiles.length < n) {
         const fileListResponse = await drive.files.list({
           pageSize: 1000,
-          fields: 'nextPageToken, files(id, name, mimeType, size)',
+          fields: 'nextPageToken, files(id, name, mimeType, size, parents)',
           q: "mimeType='image/jpeg'",
           pageToken: nextPageToken
         });
@@ -230,6 +231,7 @@ accounts.forEach((account, index) => {
   
               if (!lastTimestamp || (fileDate.getTime() <= lastTimestamp - timeDifference * 60000)) {
                 filteredFiles.push(file);
+                console.log(file.name + " "+ file.parents)
                 lastTimestamp = fileDate.getTime();
   
                 const fileId = file.id;
