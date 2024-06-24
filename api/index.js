@@ -5,15 +5,46 @@ import fs from 'fs';
 import compression from 'compression';
 import cron from 'node-cron';
 import cors from 'cors';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 dotenv.config();
 
 const app = express();
 
+// Define allowed origins from environment variable
+const allowedOrigins = process.env.ALLOWED_ORIGINS.split(',');
+
+// Configure CORS
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    }
+};
+
 app.use(compression());
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
+
+// List of endpoints from environment variable
+const endpoints = process.env.ENDPOINTS.split(',');
+
+// Target URL from environment variable
+const targetUrl = process.env.TARGET_URL;
+
+// Configure the proxy for each endpoint
+endpoints.forEach(endpoint => {
+    app.use(`/water/${endpoint}`, createProxyMiddleware({
+        target: `${targetUrl}/${endpoint}`,
+        changeOrigin: true,
+    }));    
+});
 
 // Validate environment variables
 const requiredEnvVars = ['CLIENT_ID', 'CLIENT_SECRET'];
@@ -210,7 +241,7 @@ accounts.forEach((account, index) => {
         if (!files.length) break;
   
         for (const file of files) {
-          if (file.size > 500000) {
+          if (file.size > 0) {
             const fileName = file.name;
             const timestampMatch = fileName.match(/img(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.jpg/);
             if (timestampMatch) {
